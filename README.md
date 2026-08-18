@@ -1,3 +1,18 @@
+# ObjectNavigation
+
+This repository contains the reproduction and experimental development of
+**AKGVP: Aligning Knowledge Graph with Visual Perception for Object-goal Navigation (ICRA 2024)**.
+
+The current implementation is based on the official AKGVP repository:
+
+https://github.com/nuoxu/AKGVP
+
+Base commit:
+
+`40ed00d`
+
+For reproduction details and experimental modifications, see
+[`REPRODUCTION.md`](REPRODUCTION.md).
 
 
 ## Setup
@@ -9,7 +24,8 @@
 - For zero-shot navigation, lines 70-73 in `runners/a3c_train.py` can be enabled. In this way, certain categories will be filtered during the training.
 
 ## Training and Evaluation
-### Train the AKGVP model 
+
+### Train the AKGVP model
 ```shell
 python main.py \
       --title AKGVPModel \
@@ -17,19 +33,3 @@ python main.py \
       --workers 4 \
       --gpu-ids 0 \
       --images-file-name clip_featuremap.hdf5
-```
-### Evaluate the AKGVP model
-```shell
-python full_eval.py \
-        --title AKGVPModel \
-        --model AKGVPModel \
-        --results-json AKGVPModel.json \
-        --gpu-ids 0 \
-        --images-file-name clip_featuremap.hdf5 \
-        --save-model-dir trained_models
-```
-### Visualization
-```shell
-python visualization.py
-```
-
