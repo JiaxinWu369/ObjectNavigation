@@ -1,9 +1,4 @@
-# Aligning Knowledge Graph with Visual Perception for Object-goal Navigation (ICRA 2024)
 
-https://github.com/nuoxu/AKGVP/assets/26222001/63f38873-c51c-4b1e-9d76-cf716ef0de07
-
-## Update
-- The dataset used in the paper can be found [here](https://github.com/xiaobaishu0097/ECCV-VN?tab=readme-ov-file). Since the link of RGB data has expired, we have uploaded a backup copy of the [RGB data](https://www.kaggle.com/datasets/hellob/ai2thor-clip). Please check it.
 
 ## Setup
 - Clone the repository and move into the top-level directory `cd AKGVP`
@@ -38,14 +33,3 @@ python full_eval.py \
 python visualization.py
 ```
 
-You can cite our paper as:
-```
-@inproceedings{xu2024aligning,
-  title={Aligning knowledge graph with visual perception for object-goal navigation},
-  author={Xu, Nuo and Wang, Wen and Yang, Rong and Qin, Mengjie and Lin, Zheyuan and Song, Wei and Zhang, Chunlong and Gu, Jason and Li, Chao},
-  booktitle={2024 IEEE International Conference on Robotics and Automation (ICRA)},
-  pages={5214--5220},
-  year={2024},
-  organization={IEEE}
-}
-```
