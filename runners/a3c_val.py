@@ -1,6 +1,8 @@
 from __future__ import division
 
 import time
+import os
+import json
 import torch
 import setproctitle
 import copy
@@ -85,6 +87,42 @@ def a3c_val(
         spl, best_path_length = compute_spl(player, player_start_state)
         # # sxz add
         record_actions = save_actions(actions, player.episode, spl, scene_type, player_start_state)
+
+        # -------------------------------------------------
+        # Episode-level paired-evaluation logger.
+        #
+        # Enabled only when:
+        #     AKGVP_SAVE_EPISODES=1
+        #
+        # eval_index is the deterministic index within
+        # the room-specific zs_val split.
+        # -------------------------------------------------
+        if os.environ.get("AKGVP_SAVE_EPISODES") == "1":
+            episode_record = dict(record_actions)
+
+            episode_record["eval_index"] = int(count)
+            episode_record["ep_length"] = int(player.eps_len)
+            episode_record["dts"] = float(
+                player.episode.done_dis2goal
+            )
+
+            out_file = os.path.join(
+                args.results_path,
+                "episodes_{}.jsonl".format(scene_type)
+            )
+
+            with open(
+                out_file,
+                "a",
+                encoding="utf-8"
+            ) as wf:
+                wf.write(
+                    json.dumps(
+                        episode_record,
+                        ensure_ascii=False
+                    ) + "\n"
+                )
+
         # gl.app_value('records', record_actions)
         # 计算前进比率
         count_0=0

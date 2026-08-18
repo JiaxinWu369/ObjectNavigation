@@ -11,6 +11,7 @@ import torch.multiprocessing as mp
 import time
 import random
 import json
+import pickle
 from tqdm import tqdm
 
 from utils.model_util import ScalarMeanTracker
@@ -43,6 +44,29 @@ def main_eval(args, create_shared_model, init_agent):
     target = a3c_val
     args.model_phase = 'test'  # add for whether compute kl  
 
+    episode_counts = {}
+
+    for scene_type in args.scene_types:
+        if args.test_or_val == "zs_val":
+            split_file = (
+                "test_val_split/"
+                + scene_type
+                + "_zs_val_22.pkl"
+            )
+            with open(split_file, "rb") as fp:
+                episode_counts[scene_type] = len(
+                    pickle.load(fp)
+                )
+        else:
+            episode_counts[scene_type] = 250
+
+    print(
+        "[EVAL] episode counts:",
+        episode_counts,
+        "total =",
+        sum(episode_counts.values()),
+    )
+
     rank = 0
     for scene_type in args.scene_types:
         p = mp.Process(
@@ -54,7 +78,7 @@ def main_eval(args, create_shared_model, init_agent):
                 create_shared_model,
                 init_agent,
                 res_queue,
-                250,
+                episode_counts[scene_type],
                 scene_type,
                 scenes[rank],
             ),
@@ -69,7 +93,7 @@ def main_eval(args, create_shared_model, init_agent):
     train_scalars = ScalarMeanTracker()
 
     proc = len(args.scene_types)
-    pbar = tqdm(total=250 * proc)
+    pbar = tqdm(total=sum(episode_counts.values()))
 
     visualizations = []
 

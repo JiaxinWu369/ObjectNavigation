@@ -11,6 +11,18 @@ from networkx.readwrite import json_graph
 
 # loading the possible scenes
 def loading_scene_list(args):
+    # Reproduction infrastructure:
+    # allow an explicit small scene subset for smoke tests.
+    import os
+    smoke_scenes = os.environ.get("AKGVP_TRAIN_SCENES", "").strip()
+    if args.phase == "train" and smoke_scenes:
+        scenes = [
+            x.strip()
+            for x in smoke_scenes.split(",")
+            if x.strip()
+        ]
+        print("[AKGVP] Using explicit training scenes:", scenes)
+        return scenes
     scenes = []
 
     for i in range(4):

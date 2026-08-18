@@ -42,6 +42,13 @@ class TestValEpisode(BasicEpisode):
         x, z, hor, rot = episode['state'].split('|')
         self.environment.controller.state = ThorAgentState(float(x), float(y), float(z), float(hor), float(rot))
 
+        # Reproduction infrastructure fix:
+        # refresh cached observation after direct state assignment.
+        self.environment.controller.last_action_success = True
+        self.environment.controller.last_event = (
+            self.environment.controller._successful_event()
+        )
+
         self.task_data = episode['task_data']
         self.target_object = episode['goal_object_type']
 

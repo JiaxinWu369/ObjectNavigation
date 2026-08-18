@@ -67,10 +67,10 @@ def a3c_train(
         # ['AlarmClock', 'Book', 'Bowl', 'CellPhone', 'Chair', 'CoffeeMachine', 'DeskLamp', 'FloorLamp',
         #  'Fridge', 'GarbageCan', 'Kettle', 'Laptop', 'LightSwitch', 'Microwave', 'Pan', 'Plate', 'Pot',
         #  'RemoteControl', 'Sink', 'StoveBurner', 'Television', 'Toaster',]
-        # if player.episode.target_object in ['Bowl', 'DeskLamp', 'Laptop', 'LightSwitch', 'Plate', 'StoveBurner']:
-        #     reset_player(player)
-        #     episode_num = (episode_num + 1) % len(args.scene_types)
-        #     continue
+        if player.episode.target_object in ['Bowl', 'DeskLamp', 'Laptop', 'LightSwitch', 'Plate', 'StoveBurner']:
+            reset_player(player)
+            episode_num = (episode_num + 1) % len(args.scene_types)
+            continue
 
         while not player.done:
             player.sync_with_shared(shared_model)

@@ -125,7 +125,18 @@ class AKGVPModel(torch.nn.Module):
 
         self.W0 = nn.Linear(22, 22, bias=False)
 
-    def embedding(self, state, target, action_embedding_input, scene, target_object, counterfact):
+    def embedding(
+            self,
+            state,
+            target,
+            action_embedding_input,
+            scene,
+            target_object,
+            counterfact,
+            reliability_weight=None,
+            auto_reliability_rho=None,
+            graph_branch_scale=None,
+    ):
         target_object_one_hot = target['indicator']
 
         at_v = torch.mul(target['info'][:, -1].view(target['info'].shape[0], 1), target['indicator'])
@@ -146,10 +157,120 @@ class AKGVPModel(torch.nn.Module):
         target_clip_feat = target['indicator'] * self.clip_object
         target_exp = torch.cat((target_appear, target['info'], target_clip_feat), dim=1)
 
-        attention_weight = torch.mm(self.object_distribution.prob_matrix, target_object_one_hot)
+        attention_weight = torch.mm(
+            self.object_distribution.prob_matrix,
+            target_object_one_hot
+        )
+
+        # Reliability calibration hook.
+        # None = exact original AKGVP behavior.
+        self.last_attention_weight_base = (
+            attention_weight.detach().clone()
+        )
+
+        # -------------------------------------------------
+        # Diagnostic automatic semantic intervention.
+        #
+        # This is NOT the final instance reliability method.
+        # It selects the strongest currently detected
+        # non-goal semantic category using:
+        #
+        # attention_weight * detector_score
+        #
+        # and suppresses it with a fixed rho.
+        # -------------------------------------------------
+        self.last_reliability_gate_idx = -1
+        self.last_reliability_gate_rho = 1.0
+
+        if (
+            reliability_weight is None
+            and auto_reliability_rho is not None
+        ):
+            rho_value = float(
+                auto_reliability_rho
+            )
+
+            det_scores = (
+                target['info'][:, -1]
+                .reshape(-1, 1)
+            )
+
+            valid = det_scores > 0
+
+            # Never suppress the goal category itself.
+            goal_mask = (
+                target_object_one_hot > 0
+            )
+
+            valid = (
+                valid &
+                (~goal_mask)
+            )
+
+            if torch.any(valid):
+                strength = (
+                    attention_weight.detach()
+                    *
+                    det_scores.detach()
+                ).clone()
+
+                strength[~valid] = -float("inf")
+
+                gate_idx = int(
+                    torch.argmax(
+                        strength
+                    ).item()
+                )
+
+                reliability_weight = (
+                    torch.ones_like(
+                        attention_weight
+                    )
+                )
+
+                reliability_weight[
+                    gate_idx, 0
+                ] = rho_value
+
+                self.last_reliability_gate_idx = (
+                    gate_idx
+                )
+
+                self.last_reliability_gate_rho = (
+                    rho_value
+                )
+
+        if reliability_weight is not None:
+            reliability_weight = reliability_weight.to(
+                device=attention_weight.device,
+                dtype=attention_weight.dtype,
+            ).reshape(-1, 1)
+
+            if reliability_weight.shape != attention_weight.shape:
+                raise ValueError(
+                    "reliability_weight shape "
+                    f"{tuple(reliability_weight.shape)} != "
+                    f"attention_weight shape "
+                    f"{tuple(attention_weight.shape)}"
+                )
+
+            attention_weight = (
+                attention_weight * reliability_weight
+            )
+
+        self.last_attention_weight = attention_weight.detach().clone()
+
         target_exp = torch.mul(target_exp, attention_weight)
 
         target_exp = F.relu(self.graph_detection_feature(target_exp))
+
+        # Graph-branch scale control.
+        # Scale AFTER the trained graph encoder.
+        if graph_branch_scale is not None:
+            target_exp = (
+                target_exp
+                * float(graph_branch_scale)
+            )
         target_exp_embedding = target_exp.reshape(1, self.num_cate, 7, 7)
 
         action_embedding = F.relu(self.embed_action(action_embedding_input))
@@ -221,7 +342,35 @@ class AKGVPModel(torch.nn.Module):
         target = model_input.target_class_embedding
         action_probs = model_input.action_probs
 
-        x, image_embedding, action_at = self.embedding(state, target, action_probs, scene, target_object, counterfact)
+        reliability_weight = getattr(
+            model_input,
+            "reliability_weight",
+            None
+        )
+
+        auto_reliability_rho = getattr(
+            model_input,
+            "auto_reliability_rho",
+            None
+        )
+
+        graph_branch_scale = getattr(
+            model_input,
+            "graph_branch_scale",
+            None,
+        )
+
+        x, image_embedding, action_at = self.embedding(
+            state,
+            target,
+            action_probs,
+            scene,
+            target_object,
+            counterfact,
+            reliability_weight=reliability_weight,
+            auto_reliability_rho=auto_reliability_rho,
+            graph_branch_scale=graph_branch_scale,
+        )
         actor_out, critic_out, (hx, cx) = self.a3clstm(x, hx, cx)
         actor_out = torch.mul(actor_out, action_at)
 
