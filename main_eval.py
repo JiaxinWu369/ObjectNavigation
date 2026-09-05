@@ -47,11 +47,16 @@ def main_eval(args, create_shared_model, init_agent):
     episode_counts = {}
 
     for scene_type in args.scene_types:
-        if args.test_or_val == "zs_val":
+        if (
+            args.test_or_val.startswith("zs_")
+            or args.test_or_val.startswith(("aca_", "lcr_"))
+        ):
             split_file = (
                 "test_val_split/"
                 + scene_type
-                + "_zs_val_22.pkl"
+                + "_"
+                + args.test_or_val
+                + "_22.pkl"
             )
             with open(split_file, "rb") as fp:
                 episode_counts[scene_type] = len(

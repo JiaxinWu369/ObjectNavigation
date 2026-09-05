@@ -136,6 +136,7 @@ class AKGVPModel(torch.nn.Module):
             reliability_weight=None,
             auto_reliability_rho=None,
             graph_branch_scale=None,
+            skip_object_memory_update=False,
     ):
         target_object_one_hot = target['indicator']
 
@@ -143,7 +144,12 @@ class AKGVPModel(torch.nn.Module):
         at = torch.mul(torch.max(at_v), self.action_at_scale)
         action_at = torch.mul(at, self.action_at_a) + self.action_at_b
 
-        self.object_distribution.observation_memory_update(target, scene, target_object_one_hot)
+        if not skip_object_memory_update:
+            self.object_distribution.observation_memory_update(
+                target,
+                scene,
+                target_object_one_hot,
+            )
 
         target_info_org = torch.cat((target['info'], target['indicator']), dim=1)
         target_info = F.relu(self.graph_detection_other_info_linear_1(target_info_org))
@@ -370,6 +376,13 @@ class AKGVPModel(torch.nn.Module):
             reliability_weight=reliability_weight,
             auto_reliability_rho=auto_reliability_rho,
             graph_branch_scale=graph_branch_scale,
+            skip_object_memory_update=(
+                getattr(
+                    model_input,
+                    "skip_object_memory_update",
+                    False,
+                )
+            ),
         )
         actor_out, critic_out, (hx, cx) = self.a3clstm(x, hx, cx)
         actor_out = torch.mul(actor_out, action_at)

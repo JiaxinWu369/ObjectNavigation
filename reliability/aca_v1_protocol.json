@@ -1,0 +1,25 @@
+{
+  "name": "ACA-v1",
+  "checkpoint": "AKGVP-500k",
+  "data_source": "AKGVP training scenes and seen targets only",
+  "train_scenes": 80,
+  "episodes_per_scene": 50,
+  "total_episode_specs": 4000,
+  "seed": 20260819,
+  "decision_step": 10,
+  "restore_now_end_step": 10,
+  "delay_end_step": 20,
+  "force_restore_after_step": 20,
+  "paired_arms": [
+    "Early10",
+    "Early20"
+  ],
+  "unseen_targets_excluded": [
+    "Bowl",
+    "DeskLamp",
+    "Laptop",
+    "LightSwitch",
+    "Plate",
+    "StoveBurner"
+  ]
+}

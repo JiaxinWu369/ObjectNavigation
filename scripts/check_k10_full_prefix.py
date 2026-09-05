@@ -1,147 +1,233 @@
 import json
+import re
 from pathlib import Path
-from collections import Counter
+from collections import defaultdict
+
+ROOMS = ["kitchen", "living_room", "bedroom", "bathroom"]
+
+NC = Path("results/pair_nocontext_base100")
+K10 = Path("results/pair_early10_nocontext_base100")
 
 
-NC_DIR = Path(
-    "results/pair_nocontext_base100"
-)
+def room_from_scene(scene):
+    n = int(re.search(r"\d+", scene).group())
 
-K10_DIR = Path(
-    "results/pair_early10_nocontext_base100"
-)
-
-
-def find_vis(root):
-    files = list(
-        root.rglob(
-            "visualization_metrics.json"
-        )
-    )
-
-    if len(files) != 1:
-        raise RuntimeError(
-            f"{root}: expected exactly one "
-            f"visualization_metrics.json, "
-            f"found {files}"
-        )
-
-    return files[0]
+    if n < 200:
+        return "kitchen"
+    if n < 300:
+        return "living_room"
+    if n < 400:
+        return "bedroom"
+    return "bathroom"
 
 
-def state_tuple(s):
-    """
-    AKGVP offline state:
-    x|z|rotation|horizon
-    """
-    parts = str(s).split("|")
-
-    if len(parts) != 4:
-        raise ValueError(
-            f"Unexpected state: {s}"
-        )
+def state_from_vis(s):
+    x, z, rot, hor = s.split("|")
 
     return (
-        round(float(parts[0]), 4),
-        round(float(parts[1]), 4),
-        int(round(float(parts[2]))),
-        int(round(float(parts[3]))),
+        round(float(x), 4),
+        round(float(z), 4),
+        int(round(float(rot))),
+        int(round(float(hor))),
     )
 
 
-def make_key(r):
-    states = r.get("states", [])
-
-    if not states:
-        raise RuntimeError(
-            f"No states in record: {r.keys()}"
-        )
+def state_from_json(r):
+    s = r["start_state"]
 
     return (
-        r["scene"],
-        str(r["target"]),
-        state_tuple(states[0]),
+        round(float(s["x"]), 4),
+        round(float(s["z"]), 4),
+        int(round(float(s["rotation"]["y"]))),
+        int(round(float(s["horizon"]))),
     )
 
 
-def load_vis(root):
-    p = find_vis(root)
+def target_from_vis(v):
+    t = v["target"]
 
-    with open(
-        p,
-        encoding="utf-8"
-    ) as f:
-        data = json.load(f)
+    if isinstance(t, list):
+        cats = {
+            str(x).split("|")[0]
+            for x in t
+        }
 
+        if len(cats) != 1:
+            raise RuntimeError(
+                f"multiple target categories: {t}"
+            )
+
+        return next(iter(cats))
+
+    return str(t).split("|")[0]
+
+
+def load_jsonl(root):
     out = {}
 
-    duplicate = Counter()
+    for room in ROOMS:
+        p = root / f"episodes_{room}.jsonl"
 
-    for r in data:
-        key = make_key(r)
+        with open(p, encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
 
-        if key in out:
-            duplicate[key] += 1
-        else:
-            out[key] = r
+                r = json.loads(line)
 
-    if duplicate:
-        print(
-            "Duplicate episode identifiers:"
-        )
+                key = (
+                    room,
+                    int(r["eval_index"]),
+                )
 
-        for k, v in duplicate.most_common(20):
-            print(k, v + 1)
-
-        raise RuntimeError(
-            "Cannot safely pair by "
-            "(scene,target,start_state)."
-        )
+                out[key] = r
 
     return out
 
 
-nc = load_vis(NC_DIR)
-k10 = load_vis(K10_DIR)
-
-print("=" * 80)
-print("FULL ACTION PREFIX VALIDATION")
-print("=" * 80)
-
-print("NoContext records:", len(nc))
-print("Early10 records  :", len(k10))
-
-only_nc = set(nc) - set(k10)
-only_k10 = set(k10) - set(nc)
-
-print("only NoContext   :", len(only_nc))
-print("only Early10     :", len(only_k10))
-
-if only_nc:
-    print(
-        "example only NC:",
-        list(only_nc)[:5]
+def load_vis(root, json_rows):
+    p = (
+        root
+        / "visualization_files"
+        / "visualization_metrics.json"
     )
 
-if only_k10:
-    print(
-        "example only K10:",
-        list(only_k10)[:5]
-    )
+    with open(p, encoding="utf-8") as f:
+        data = json.load(f)
 
-assert set(nc) == set(k10)
+    assert len(data) == 1260
+
+    # Important:
+    # global order is interleaved across processes,
+    # but relative order from each room process is preserved.
+    by_room = defaultdict(list)
+
+    for v in data:
+        room = room_from_scene(v["scene"])
+        by_room[room].append(v)
+
+    out = {}
+    mismatch = []
+
+    for room in ROOMS:
+
+        expected = sum(
+            1
+            for r, _ in json_rows
+            if r == room
+        )
+
+        print(
+            f"{room:<12} "
+            f"vis={len(by_room[room]):4d} "
+            f"jsonl={expected:4d}"
+        )
+
+        assert len(by_room[room]) == expected
+
+        for idx, v in enumerate(by_room[room]):
+
+            key = (room, idx)
+            j = json_rows[key]
+
+            problems = []
+
+            if v["scene"] != j["scene"]:
+                problems.append(
+                    f"scene {v['scene']} != {j['scene']}"
+                )
+
+            vt = target_from_vis(v)
+
+            if vt != j["target"]:
+                problems.append(
+                    f"target {vt} != {j['target']}"
+                )
+
+            vs = state_from_vis(
+                v["states"][0]
+            )
+
+            js = state_from_json(j)
+
+            if vs != js:
+                problems.append(
+                    f"start {vs} != {js}"
+                )
+
+            if bool(v["success"]) != bool(j["success"]):
+                problems.append(
+                    f"success "
+                    f"{v['success']} != {j['success']}"
+                )
+
+            if problems:
+                mismatch.append(
+                    (key, problems)
+                )
+
+            out[key] = v
+
+    if mismatch:
+
+        print("\nMAPPING MISMATCH EXAMPLES")
+
+        for x in mismatch[:20]:
+            print(x)
+
+        raise RuntimeError(
+            f"mapping failed: {len(mismatch)} mismatches"
+        )
+
+    print("metadata validation: PASS")
+
+    return out
+
+
+nc_json = load_jsonl(NC)
+k10_json = load_jsonl(K10)
+
+assert set(nc_json) == set(k10_json)
+
+
+print("=" * 80)
+print("NOCONTEXT MAPPING")
+print("=" * 80)
+
+nc_vis = load_vis(
+    NC,
+    nc_json,
+)
+
+
+print()
+print("=" * 80)
+print("EARLY10 MAPPING")
+print("=" * 80)
+
+k10_vis = load_vis(
+    K10,
+    k10_json,
+)
+
+
+assert set(nc_vis) == set(k10_vis)
+
 
 prefix_mismatch = []
-short_episodes = []
-success_discordant = []
-discordant_short = []
+state10_mismatch = []
+length_mismatch = []
+discordant = []
+discordant_before_restore = []
 
-length_mismatch = 0
 
-for key in sorted(nc):
+for key in sorted(nc_vis):
 
-    a = nc[key]
-    b = k10[key]
+    a = nc_vis[key]
+    b = k10_vis[key]
+
+    ja = nc_json[key]
+    jb = k10_json[key]
 
     aa = [
         int(x)
@@ -153,115 +239,135 @@ for key in sorted(nc):
         for x in b["action_list"]
     ]
 
-    # Number of recorded states should
-    # correspond to number of decisions.
-    if len(a["states"]) != len(aa):
-        length_mismatch += 1
+    # Full history sanity check
+    if (
+        len(aa) != int(ja["ep_length"])
+        or len(a["states"]) != int(ja["ep_length"])
+    ):
+        length_mismatch.append(
+            ("NC", key, len(aa),
+             len(a["states"]),
+             ja["ep_length"])
+        )
 
-    if len(b["states"]) != len(bb):
-        length_mismatch += 1
+    if (
+        len(bb) != int(jb["ep_length"])
+        or len(b["states"]) != int(jb["ep_length"])
+    ):
+        length_mismatch.append(
+            ("K10", key, len(bb),
+             len(b["states"]),
+             jb["ep_length"])
+        )
 
-    # Episode ended before restoration point.
-    if min(len(aa), len(bb)) < 10:
+    # Actions 0..9 must be identical.
+    n = min(10, len(aa), len(bb))
 
-        short_episodes.append(
+    if aa[:n] != bb[:n]:
+        prefix_mismatch.append(
             (
                 key,
-                len(aa),
-                len(bb),
+                aa[:10],
+                bb[:10],
             )
         )
 
-        # Since both policies are identical
-        # before step 10, complete trajectories
-        # should also be identical if both
-        # terminate before step 10.
-        if aa != bb:
-            prefix_mismatch.append(
-                (
-                    key,
-                    aa,
-                    bb,
-                )
+    # If both reach state before action index 10,
+    # states[10] must also be identical.
+    if len(aa) >= 11 and len(bb) >= 11:
+
+        sa = state_from_vis(
+            a["states"][10]
+        )
+
+        sb = state_from_vis(
+            b["states"][10]
+        )
+
+        if sa != sb:
+            state10_mismatch.append(
+                (key, sa, sb)
             )
 
-    else:
+    # Final outcome reversal
+    suc_a = bool(ja["success"])
+    suc_b = bool(jb["success"])
 
-        if aa[:10] != bb[:10]:
-            prefix_mismatch.append(
-                (
-                    key,
-                    aa[:10],
-                    bb[:10],
-                )
-            )
+    if suc_a != suc_b:
 
-    sa = bool(a["success"])
-    sb = bool(b["success"])
+        discordant.append(key)
 
-    if sa != sb:
-        success_discordant.append(key)
-
-        if min(len(aa), len(bb)) < 10:
-            discordant_short.append(
+        # Restoration begins when action index 10
+        # is evaluated/executed.
+        if len(aa) < 11 or len(bb) < 11:
+            discordant_before_restore.append(
                 (
                     key,
                     len(aa),
                     len(bb),
-                    sa,
-                    sb,
+                    suc_a,
+                    suc_b,
                 )
             )
 
 
 print()
-print("Prefix mismatch first 10 :",
-      len(prefix_mismatch))
+print("=" * 80)
+print("K10 MATCHED INTERVENTION CHECK")
+print("=" * 80)
 
-print("Episodes ending <10      :",
-      len(short_episodes))
+print(
+    "Episodes                      :",
+    len(nc_vis)
+)
 
-print("Success discordant        :",
-      len(success_discordant))
+print(
+    "Full history length mismatch  :",
+    len(length_mismatch)
+)
 
-print("Discordant ending <10     :",
-      len(discordant_short))
+print(
+    "First-10 action mismatch      :",
+    len(prefix_mismatch)
+)
 
-print("state/action len mismatch :",
-      length_mismatch)
+print(
+    "t=10 state mismatch           :",
+    len(state10_mismatch)
+)
+
+print(
+    "Success-discordant episodes   :",
+    len(discordant)
+)
+
+print(
+    "Discordant before restoration :",
+    len(discordant_before_restore)
+)
 
 
 if prefix_mismatch:
-    print()
-    print("PREFIX MISMATCH EXAMPLES")
-
+    print("\nPREFIX EXAMPLES")
     for x in prefix_mismatch[:10]:
         print(x)
 
+if state10_mismatch:
+    print("\nSTATE10 EXAMPLES")
+    for x in state10_mismatch[:10]:
+        print(x)
 
-if discordant_short:
-    print()
-    print(
-        "DISCORDANT SHORT EXAMPLES"
-    )
-
-    for x in discordant_short[:10]:
+if discordant_before_restore:
+    print("\nEARLY DISCORDANT EXAMPLES")
+    for x in discordant_before_restore[:10]:
         print(x)
 
 
-assert len(success_discordant) == 79
-
-assert len(prefix_mismatch) == 0, (
-    "NoContext and Early10 are not "
-    "identical before step 10."
-)
-
-assert len(discordant_short) == 0, (
-    "Found success reversal before "
-    "the intervention point."
-)
+assert len(length_mismatch) == 0
+assert len(prefix_mismatch) == 0
+assert len(state10_mismatch) == 0
+assert len(discordant) == 79
+assert len(discordant_before_restore) == 0
 
 print()
-print(
-    "K10 FULL MATCHED PREFIX: PASS"
-)
+print("K10 FULL MATCHED INTERVENTION: PASS")

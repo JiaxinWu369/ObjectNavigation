@@ -33,6 +33,28 @@ def loading_scene_list(args):
                 else:
                     scenes.append("FloorPlan" + str(i + 1) + '%02d' % (j + 1))
         elif args.phase == 'eval':
+            # ACA selector supervision is generated only from
+            # the original AKGVP training scenes.
+            if getattr(
+                args,
+                "test_or_val",
+                "",
+            ).startswith(("aca_", "lcr_")):
+                aca_train_scenes = []
+                for j in range(20):
+                    if i == 0:
+                        aca_train_scenes.append(
+                            "FloorPlan" + str(j + 1)
+                        )
+                    else:
+                        aca_train_scenes.append(
+                            "FloorPlan"
+                            + str(i + 1)
+                            + '%02d' % (j + 1)
+                        )
+                scenes.append(aca_train_scenes)
+                continue
+
             eval_scenes_list = []
             for j in range(10):
                 if i == 0:

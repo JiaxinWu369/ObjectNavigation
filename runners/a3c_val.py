@@ -41,6 +41,27 @@ def a3c_val(
 
     targets = AI2THOR_TARGET_CLASSES[args.num_category]
 
+    # Optional diagnostic smoke-test limiter.
+    # Unset = exact original evaluation count.
+    max_count_env = os.environ.get(
+        "AKGVP_EVAL_MAX_COUNT"
+    )
+
+    if max_count_env is not None:
+        requested_max_count = int(
+            max_count_env
+        )
+
+        if requested_max_count <= 0:
+            raise ValueError(
+                "AKGVP_EVAL_MAX_COUNT must be > 0"
+            )
+
+        max_count = min(
+            max_count,
+            requested_max_count
+        )
+
     if scene_type == "living_room":
         args.max_episode_length = 200
     else:
@@ -76,6 +97,43 @@ def a3c_val(
         new_episode(args, player)
         player_start_state = copy.deepcopy(player.environment.controller.state)
         player_start_time = time.time()
+        # -------------------------------------------------
+        # Case-only qualitative trace.
+        #
+        # Logging only. eval_index is attached to the Episode
+        # so the agent can identify one deterministic case.
+        # -------------------------------------------------
+        if (
+            os.environ.get(
+                "AKGVP_CASE_TRACE",
+                "0",
+            ).strip()
+            == "1"
+        ):
+            player.episode.case_trace_eval_index = int(count)
+            player.episode.case_semantic_trace = []
+            player.episode.case_execution_trace = []
+
+        # -------------------------------------------------
+        # Intervention-frequency diagnostics.
+        #
+        # Reset once per evaluation episode.
+        # -------------------------------------------------
+        if (
+            os.environ.get(
+                "AKGVP_FREQ_DIAG",
+                "0",
+            ).strip()
+            == "1"
+        ):
+            player.episode.diag_exec_steps = 0
+            player.episode.diag_arb_steps = 0
+            player.episode.diag_arb_disagree = 0
+            player.episode.diag_disagree_use_base = 0
+            player.episode.diag_disagree_use_lcr = 0
+            player.episode.diag_lcr_selected = 0
+            player.episode.diag_br_triggers = 0
+
         actions = []
         while not player.done:
             player.sync_with_shared(shared_model)
@@ -105,6 +163,85 @@ def a3c_val(
             episode_record["dts"] = float(
                 player.episode.done_dis2goal
             )
+
+            # Authoritative complete episode histories.
+            # Keep legacy "actions" unchanged for
+            # backward compatibility.
+            episode_record["full_actions"] = [
+                int(item)
+                for item
+                in player.episode.actions_record
+            ]
+
+            episode_record["full_states"] = list(
+                player.episode.states
+            )
+
+            # -------------------------------------------------
+            # Compact intervention-frequency diagnostics.
+            # -------------------------------------------------
+            if (
+                os.environ.get(
+                    "AKGVP_FREQ_DIAG",
+                    "0",
+                ).strip()
+                == "1"
+            ):
+                for _diag_key in [
+                    "diag_exec_steps",
+                    "diag_arb_steps",
+                    "diag_arb_disagree",
+                    "diag_disagree_use_base",
+                    "diag_disagree_use_lcr",
+                    "diag_lcr_selected",
+                    "diag_br_triggers",
+                ]:
+                    episode_record[_diag_key] = int(
+                        getattr(
+                            player.episode,
+                            _diag_key,
+                            0,
+                        )
+                    )
+
+            # -------------------------------------------------
+            # Optional case-only qualitative trace.
+            # -------------------------------------------------
+            if (
+                os.environ.get(
+                    "AKGVP_CASE_TRACE",
+                    "0",
+                ).strip()
+                == "1"
+            ):
+                episode_record[
+                    "case_semantic_trace"
+                ] = getattr(
+                    player.episode,
+                    "case_semantic_trace",
+                    [],
+                )
+
+                episode_record[
+                    "case_execution_trace"
+                ] = getattr(
+                    player.episode,
+                    "case_execution_trace",
+                    [],
+                )
+
+            # Optional compact semantic trace.
+            if os.environ.get(
+                "AKGVP_SAVE_CONTEXT_TRACE"
+            ) == "1":
+
+                episode_record[
+                    "context_trace"
+                ] = getattr(
+                    player.episode,
+                    "context_trace",
+                    []
+                )
 
             out_file = os.path.join(
                 args.results_path,
